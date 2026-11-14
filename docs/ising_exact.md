@@ -1,0 +1,324 @@
+# The exact spectrum of the 2D Ising transfer matrix on a strip of finite width
+
+Started 2026-11-13.  This note explains the formula behind `exact_solutions/ising_exact.py`:
+what object it solves, the eigenvalue formula, the three conventions in use for saying which
+sign patterns are eigenvalues, and how the momentum (spin) of a level is obtained.  The code
+is the reference against which numerical transfer-matrix spectra are checked.
+
+Every number quoted below was computed with that module on 2026-11-13.  The formula is not
+derived here (section 3 sketches where it comes from and cites the derivation); what this
+note can vouch for is that the formula AS CODED reproduces the transfer matrix built from the
+Boltzmann weights, level by level and label by label (section 8).
+
+## 1. The object
+
+Ising spins $s = \pm 1$ on a square lattice, coupling $K = J / k_B T$ on every bond.  Take
+$n$ spins in a row with periodic boundary conditions.  The row-to-row transfer matrix, in its
+symmetric form, is
+
+$$
+V[s, s'] = \exp\Big(\tfrac{K}{2} \sum_{i=1}^{n} s_i s_{i+1}\Big)\,
+           \exp\Big(K \sum_{i=1}^{n} s_i s'_i\Big)\,
+           \exp\Big(\tfrac{K}{2} \sum_{i=1}^{n} s'_i s'_{i+1}\Big),
+$$
+
+so that the partition function of the $n \times M$ torus is $Z = \operatorname{Tr} V^M$.  A
+ring of $n$ vertex tensors, or a ring of blocks after an untruncated coarse-graining, has the
+same spectrum.
+
+$V$ commutes with two operations, so every eigenvector carries two labels:
+
+- the **charge** $0$ or $1$: even or odd under the flip of all spins;
+- the **momentum** $P = 2\pi S / n$: translation by one site multiplies the eigenvector by
+  $e^{iP}$.  The integer $S$, defined modulo $n$, is called the **spin** below (it is the
+  conformal spin of the level at the critical point; it is not the Ising spin).
+
+## 2. The formula
+
+Define the dual coupling $K^*$ by
+
+$$
+\tanh K^* = e^{-2K} \qquad\Longleftrightarrow\qquad \sinh 2K \, \sinh 2K^* = 1 ,
+$$
+
+and, for an angle $q$, the number $\gamma_q$ by
+
+$$
+\cosh \gamma_q = \cosh 2K \, \cosh 2K^* - \cos q .
+$$
+
+Then every eigenvalue of $V$ has the form
+
+$$
+\lambda = (2 \sinh 2K)^{n/2} \, \exp\Big( \tfrac12 \sum_{q} \epsilon_q \gamma_q \Big),
+\qquad \epsilon_q = \pm 1 ,
+$$
+
+with one sign for each of the $n$ angles of its sector:
+
+| sector | angles | $j = 0, \dots, n-1$ |
+|---|---|---|
+| charge 0 | $q = (2j+1)\,\pi / n$ | odd multiples of $\pi/n$ |
+| charge 1 | $q = 2j\,\pi / n$ | even multiples of $\pi/n$ |
+
+Each sector has $2^n$ sign patterns and $2^{n-1}$ eigenvalues: half of the patterns occur.
+Which half is the subject of section 4.
+
+**The dispersion in a form without cancellation.**  Because
+$\sinh 2K \sinh 2K^* = 1$, one has $\cosh 2K \cosh 2K^* = 1 + \cosh 2(K - K^*)$, and the
+definition of $\gamma_q$ becomes
+
+$$
+\sinh^2 \frac{\gamma_q}{2} = \sinh^2 (K - K^*) + \sin^2 \frac{q}{2}
+\qquad\Longrightarrow\qquad
+\gamma_q = 2 \operatorname{asinh} \sqrt{ \sinh^2 (K - K^*) + \sin^2 \tfrac{q}{2} } .
+$$
+
+This is the same function; the code uses it because the first form subtracts two numbers
+close to 1 when $q$ is small or $T$ is near $T_c$.  Three special cases:
+
+- $q = 0$: $\gamma_0 = 2\,|K - K^*|$.  The definition fixes $\gamma_0$ only up to its sign,
+  which is where the conventions of section 4 come from.
+- $q = \pi$: $\gamma_\pi = 2\,(K + K^*)$, positive, no ambiguity.
+- at the critical point $K = K^* = \tfrac12 \ln(1 + \sqrt2)$: $\gamma_q = 2 \operatorname{asinh} |\sin \tfrac{q}{2}|$, which vanishes linearly at $q = 0$.
+
+$\gamma_q = \gamma_{2\pi - q}$, so apart from $q = 0$ and $q = \pi$ the angles come in pairs
+of equal $\gamma$.
+
+## 3. Where it comes from (a sketch)
+
+Write $V = V_1^{1/2} V_2 V_1^{1/2}$ with the bonds inside a row in
+$V_1 = \exp\big(K \sum_i \sigma^z_i \sigma^z_{i+1}\big)$ and the bonds between two rows in
+$V_2$.  One vertical bond is the $2 \times 2$ matrix $e^{K} + e^{-K} \sigma^x$, and
+
+$$
+e^{K} + e^{-K} \sigma^x = (2 \sinh 2K)^{1/2} \exp( K^* \sigma^x ),
+\qquad\text{so}\qquad
+V_2 = (2 \sinh 2K)^{n/2} \exp\Big( K^* \sum_i \sigma^x_i \Big) .
+$$
+
+That is where the prefactor and the dual coupling enter.  A Jordan-Wigner transformation
+turns both exponents into quadratic forms in fermion operators.  The bond that closes the row
+picks up the spin-flip parity, so the fermions are ANTIPERIODIC around the strip in the
+charge-0 sector and PERIODIC in the charge-1 sector: hence the two sets of angles.  A
+Bogoliubov rotation then diagonalizes the product mode by mode, and each mode contributes
+$e^{+\gamma_q/2}$ or $e^{-\gamma_q/2}$.
+
+The mode $q = 0$ has no partner $-q$ to be rotated with.  Its two states, empty and occupied,
+differ in energy by $2\,|K - K^*|$, and WHICH of the two is the lower one changes at $T_c$.
+That single fact is the origin of everything in section 4.  (The mode $q = \pi$, when present,
+is unpaired too, but its energy $2(K + K^*)$ never changes sign.)
+
+Derivations: L. Onsager, Phys. Rev. 65, 117 (1944); B. Kaufman, Phys. Rev. 76, 1232 (1949);
+T. D. Schultz, D. C. Mattis and E. H. Lieb, Rev. Mod. Phys. 36, 856 (1964).
+
+## 4. Which sign patterns: three conventions, one set of levels
+
+In the charge-0 sector all codes agree: a pattern is an eigenvalue when the number of minus
+signs is EVEN.  In the charge-1 sector they differ, and the whole difference sits in the one
+mode $q = 0$, whose $\gamma_0$ the definition leaves undetermined in sign.
+
+| convention | value given to $\gamma_0$ | charge 0 | charge 1 | used by |
+|---|---|---|---|---|
+| A, "Kaufman" | $2(K - K^*)$: positive below $T_c$ | even number of minus signs | **even** number of minus signs | `gammas`, `Ei_kmax` of this module |
+| B, "fermion vacuum" | $2(K^* - K)$: positive above $T_c$ | even | **odd** number of minus signs | the usual fermionic presentation |
+| C, "excitations" | $2\,\lvert K - K^* \rvert \ge 0$ | even number of fermions | **odd above $T_c$, even below** | `levels`, `sector_tables` of this module |
+
+Convention A is named after Kaufman because the script `gammas` and `Ei_kmax` come from
+follows her notation $H, H^*$ for $K, K^*$; her paper was not consulted for the sign.
+
+**Why A and B are the same set.**  Only the product $\epsilon_0 \gamma_0$ enters $\lambda$.
+Take a pattern allowed by B and reverse its first sign alone.  The product $\epsilon_0 \gamma_0$
+is unchanged, because the sign and the value given to $\gamma_0$ have both been reversed, so
+$\lambda$ is the same number; and the count of minus signs has changed by exactly one, so odd
+has become even: the new pattern is one allowed by A.  Doing it twice gives back the original
+pattern, so the two lists are paired one to one, with the same multiplicities.
+
+**A worked example.**  Width $n = 3$, charge 1, at $1.2\,T_c$: $K = 0.36724$, $K^* = 0.52267$,
+$\gamma_0 = \pm 0.31086$, $\gamma_{2\pi/3} = \gamma_{4\pi/3} = 1.58781$.  The patterns are
+written $(\epsilon_0\, \epsilon_{2\pi/3}\, \epsilon_{4\pi/3})$.
+
+| B: $\gamma_0 = +0.31086$, odd | A: $\gamma_0 = -0.31086$, even | $\lambda$ from either | $\lambda$ of $V$, diagonalized |
+|---|---|---|---|
+| $(-++)$ | $(+++)$ | 8.5141788240 | 8.5141788240 |
+| $(+-+)$ | $(--+)$ | 2.3744721434 | 2.3744721434 |
+| $(++-)$ | $(-+-)$ | 2.3744721434 | 2.3744721434 |
+| $(---)$ | $(+--)$ | 0.3556191894 | 0.3556191894 |
+
+Each row is one level written two ways; the two patterns differ in their first sign only.
+The last column is $V$ built from the Boltzmann weights of section 1 and diagonalized in the
+charge-1 sector.  Below $T_c$ the same four pairings hold; the numerical value of $\gamma_0$
+has changed sign in both conventions.
+
+**What each convention says.**
+
+- B reads a minus sign as an occupied fermion, and the charge-1 sector always holds an odd
+  number of them.  The $q = 0$ fermion costs $2(K^* - K)$, which is negative below $T_c$:
+  occupying it there RAISES $\lambda$.
+- A keeps one rule, "even", for both sectors and makes the largest eigenvalue of each sector
+  the all-plus pattern.  The price is a $\gamma_0$ that changes sign at $T_c$.
+- C counts every $\gamma_q \ge 0$ as the energy of one fermion, so that more fermions always
+  means a smaller $\lambda$.  Then the RULE has to change at $T_c$ instead of the sign: see
+  the next section.
+
+At $T_c$ itself $\gamma_0 = 0$, the first sign does nothing, and the three coincide.
+
+## 5. Levels as fermions
+
+Put $E = -\ln \lambda$.  In convention C
+
+$$
+E = E_{\rm vac}({\rm charge}) + \sum_{q\ {\rm occupied}} \gamma_q ,
+\qquad
+E_{\rm vac} = -\frac{n}{2} \ln (2 \sinh 2K) - \frac12 \sum_{q} \gamma_q ,
+$$
+
+the sum in $E_{\rm vac}$ running over the $n$ angles of that sector, and the allowed
+occupations are
+
+- charge 0: an **even** number of fermions;
+- charge 1: an **odd** number above $T_c$, an **even** number below.
+
+The lowest level of all, $E_0$, is the charge-0 vacuum.  The code reports
+$X = (E - E_0)\, n / 2\pi$, which at $T_c$ tends to the scaling dimension as $n \to \infty$.
+
+The change of rule at $T_c$ is the phase transition written in the counting.  Above $T_c$ the
+lowest charge-1 level holds one fermion at $q = 0$, and its distance from $E_0$ tends to
+$\gamma_0 = 2(K^* - K)$, the inverse correlation length.  Below $T_c$ it holds none and lies
+exponentially close to $E_0$: the two ordered states.
+
+| $n$ | $E_1 - E_0$ at $1.2\,T_c$ ($\gamma_0 = 0.3108561287$) | $E_1 - E_0$ at $0.8\,T_c$ |
+|---|---|---|
+| 8 | 0.3261155415 | $7.7 \times 10^{-3}$ |
+| 16 | 0.3116924099 | $1.9 \times 10^{-4}$ |
+| 32 | 0.3108600721 | $1.8 \times 10^{-7}$ |
+| 64 | 0.3108561288 | $2.6 \times 10^{-13}$ |
+
+**How many fermions the low levels hold.**  Nothing in `levels` caps the number of fermions;
+levels come out in order of $E$.  At $T_c$ the cheapest $N$ fermions occupy the $N$ smallest
+$|q|$, which puts the first $N$-fermion level at $X \approx N^2/4$ in charge 0 ($N$ even) and
+at $X \approx \tfrac18 + (N^2 - 1)/4$ in charge 1 ($N$ odd).  Measured at $n = 1024$:
+
+| fermions | charge | first appears at $X$ | as level number |
+|---|---|---|---|
+| 1 | 1 | 0.125000 | 2 |
+| 2 | 0 | 0.999999 | 3 |
+| 3 | 1 | 2.124994 | 12 |
+| 4 | 0 | 3.999978 | 32 |
+| 5 | 1 | 6.124944 | 111 |
+| 6 | 0 | 8.999880 | 326 |
+| 8 | 0 | 15.999611 | 3,646 |
+| 10 | 0 | 24.999039 | 42,152 |
+
+So a list cut by particle number is complete only for the first few levels: a cap at two
+fermions already fails at level 12, a cap at three at level 32.
+
+## 6. Momentum (spin)
+
+**The rule.**  The momentum of a level is the sum of the momenta of its occupied fermions,
+modulo $2\pi$; the vacuum of each sector has momentum zero.
+
+**In integers.**  Write every angle as $q = l\,\pi / n$ with an integer $l$ between $0$ and
+$2n - 1$: $l$ is odd in the charge-0 sector and even in the charge-1 sector.  A fermion at
+that angle carries momentum $l/2$ in units of $2\pi/n$, and
+
+$$
+S = \frac12 \sum_{{\rm occupied}} l \pmod n .
+$$
+
+The code carries $\sum l$ (its `twice_spin`) rather than $S$ to avoid fractions.
+
+- **$S$ is an integer.**  In the charge-0 sector a single fermion has half-integer momentum
+  (odd $l$), which is the antiperiodic boundary condition of section 3; but the sector holds
+  an even number of them, so $\sum l$ is even.  In the charge-1 sector every $l$ is even.
+- **The $q = 0$ fermion carries no momentum** ($l = 0$).  The spin of a level is therefore the
+  same in conventions A, B and C, which differ only in how that one mode is counted.
+- **Negative momenta.**  The angle $2\pi - q$ is the momentum $-q$; it appears as
+  $l \to 2n - l$.
+
+**The range.**  $S$ is defined modulo $n$.  The code reports the representative in
+$[-n/2,\ n/2)$, computed as $((S + \lfloor n/2 \rfloor) \bmod n) - \lfloor n/2 \rfloor$.  For
+$n = 8$ the labels run from $-4$ to $+3$: momentum $\pi$ is written $-4$ and $+4$ never
+appears.  For $n = 7$ they run from $-3$ to $+3$.
+
+**The sign is a convention.**  Counting the angles $0 < q < \pi$ as positive is a choice.
+The opposite choice sends every $S$ to $-S$, and the spectrum is the same under that
+exchange, so no comparison of eigenvalues can tell the two apart.  The label is not tied to
+a direction of translation on the lattice; fixing that would need eigenvectors, which the
+module does not produce.
+
+**A worked example.**  Width $n = 16$ at $T_c$, charge 0, two fermions.  In units where a
+fermion at $l$ contributes $\gamma\, n / 2\pi$ to $X$: $l = 1$ and $l = 31$ each give
+$0.498401$, $l = 3$ and $l = 29$ each give $1.458395$.
+
+| occupied $l$ | momenta | $\sum l$ | $S$ | $X$ |
+|---|---|---|---|---|
+| 1, 31 | $+\tfrac12,\ -\tfrac12$ | 32 | 0 | 0.996803 |
+| 1, 3 | $+\tfrac12,\ +\tfrac32$ | 4 | $+2$ | 1.956796 |
+| 31, 29 | $-\tfrac12,\ -\tfrac32$ | 60 | $-2$ | 1.956796 |
+| 1, 29 | $+\tfrac12,\ -\tfrac32$ | 30 | $-1$ | 1.956796 |
+| 31, 3 | $-\tfrac12,\ +\tfrac32$ | 34 | $+1$ | 1.956796 |
+
+The first row is the energy operator.  The other four are one exactly four-fold degenerate
+level, spread over four different spins.
+
+**The low levels at $T_c$**, $n = 64$, with the operator of the Ising CFT each one becomes
+(the two with $S = \pm 2$ and $X \to 2$ are the stress tensor and its conjugate; which sign
+is which is the convention above):
+
+| $X$ | charge | $S$ | fermions | becomes |
+|---|---|---|---|---|
+| 0.000000 | 0 | 0 | 0 | identity |
+| 0.125013 | 1 | 0 | 1 | $\sigma$, dimension $1/8$ |
+| 0.999799 | 0 | 0 | 2 | $\varepsilon$, dimension $1$ |
+| 1.124210 | 1 | $\pm 1$ | 1 | derivatives of $\sigma$ |
+| 1.997196 | 0 | $\pm 1$ | 2 | derivatives of $\varepsilon$ |
+| 1.997196 | 0 | $\pm 2$ | 2 | $T$, $\bar T$ |
+| 2.118618 | 1 | $\pm 2$ | 1 | second-level descendants of $\sigma$ |
+| 2.123408 | 1 | 0 | 3 | second-level descendant of $\sigma$ |
+
+The ground level also carries the central charge: $E_0 = n f - \pi c / 6n + \dots$ with
+Onsager's bulk free energy $f$ gives $c = 1/2$ to $2 \times 10^{-4}$ at $n = 128$.
+
+## 7. Comparing with a numerical transfer matrix
+
+- **Ask by number of levels, per sector.**  A solver returns the lowest $N$ eigenvalues of a
+  sector, in order, and knows nothing of fermion number.  `sector_tables(n, T, N)` and
+  `levels(n, T, N, charge=, spin=)` return the same thing, complete.
+- **$n$ is the full width in lattice sites**: for a ring of $r$ blocks of $L$ sites, $n = rL$.
+- **Momentum is finer on the exact side.**  A ring of $r$ blocks, translated block by block,
+  resolves the spin only modulo $r$; group the exact levels by $S \bmod r$ before comparing.
+  Treat $+S$ and $-S$ as a pair.
+- **Do not compare one global list across a degenerate level.**  A Krylov solver started from
+  one vector can return two copies of a four-fold level and then the next level.  Sector by
+  sector the four copies are in four different lists and the problem does not arise.
+
+## 8. The code, and how it was checked
+
+| in this note | in `exact_solutions/ising_exact.py` |
+|---|---|
+| $K^*$, $K - K^*$, $\gamma_q$ | `dual_coupling`, `detuning`, `dispersion` |
+| the $2n$ values $\gamma_l$, convention A | `gammas(T, n)` |
+| the lowest levels, convention A, no labels | `Ei_kmax(n, T, num_collect, kmax=None)` |
+| the lowest levels with charge, $S$, fermions | `levels(n, T, num_levels, charge=, spin=)` |
+| the lowest levels of all $2n$ sectors | `sector_tables(n, T, num_levels)` |
+| $E_0$ | `ground_energy(n, T)` |
+
+`levels` finds the lowest $N$ of the whole spectrum best-first with a heap; `sector_tables`
+finds the lowest $N$ of every sector by a dynamic programme over the modes, whose cost does
+not depend on the spin.  The `README.md` has the timings and the provenance.
+
+Checks (`tests/test_ising_exact.py`, 13 tests):
+
+- **Against the definition.**  $V$ of section 1 built from the Boltzmann weights and projected
+  onto every (charge, momentum) sector, with the spin flip and the translation written as
+  permutations of the $2^n$ configurations: all $2^n$ levels, their values and both labels,
+  for $n = 1, \dots, 8$ at $0.7$, $1$ and $1.4\,T_c$, to $10^{-10}$, by both algorithms.
+  Shifting the charge-1 spins by one, or exchanging the two charges, makes the comparison
+  fail, so it does test the labels; it cannot test the sign of $S$.  It is also the evidence
+  that both vacua have momentum zero.
+- **Against the recorded values** that the earlier script returned, kept in
+  `tests/data/original_reference.json`: 900 argument combinations of `Ei_kmax`, to
+  $10^{-11}$.
+- **The two algorithms against each other** at $n = 24$, and the CFT content and $c = 1/2$
+  above.
