@@ -49,6 +49,14 @@ class Arithmetic:
             value = value.item()
         return self._number(value)
 
+    def values(self, value):
+        """Convert a scalar or array without discarding its shape."""
+        if np.ndim(value) == 0:
+            if isinstance(value, np.ndarray):
+                value = value.item()
+            return self.number(value)
+        return self.array(value)
+
     def array(self, values):
         # Object dtype must be selected before NumPy infers a common scalar type:
         # a mixed list of Python floats and large integers must not round to double.

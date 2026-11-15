@@ -82,8 +82,8 @@ def critical_temperature(*, dps=None):
 
 
 def _coupling(T, ar):
-    T = ar.number(T)
-    if not ar.isfinite(T) or T <= 0:
+    T = ar.values(T)
+    if not np.all(ar.isfinite(T)) or np.any(T <= 0):
         raise ValueError("T must be finite and positive")
     return J / (kB * T)
 
@@ -96,39 +96,47 @@ def coupling(T, *, dps=None):
 def _dual_coupling(K, ar):
     # atanh(exp(-2K)), without rounding tanh(K) to one at low temperature
     small = ar.exp(-2 * K)
-    log_difference = ar.log(-ar.expm1(-2 * K)) if K < 1 else ar.log1p(-small)
+    if np.ndim(K) == 0:
+        log_difference = ar.log(-ar.expm1(-2 * K)) if K < 1 else ar.log1p(-small)
+    else:
+        low = K < 1
+        log_difference = np.empty(K.shape, dtype=ar.dtype)
+        log_difference[low] = ar.log(-ar.expm1(-2 * K[low]))
+        log_difference[~low] = ar.log1p(-small[~low])
     return (ar.log1p(small) - log_difference) / 2
 
 
 def dual_coupling(K, *, dps=None):
     """K* with tanh K* = exp(-2K), equivalently sinh 2K sinh 2K* = 1 (Kaufman's H*)."""
     ar = Arithmetic(dps)
-    return _dual_coupling(ar.number(K), ar)
+    return _dual_coupling(ar.values(K), ar)
 
 
 def detuning(K, *, dps=None):
     """K - K*: zero at T_c, positive below it, negative above."""
     ar = Arithmetic(dps)
-    K = ar.number(K)
+    K = ar.values(K)
     return K - _dual_coupling(K, ar)
 
 
 def _dispersion(K, q, ar):
     delta = abs(K - _dual_coupling(K, ar))
-    sine = ar.sin(ar.array(q) / 2)
-    if delta < 1:
-        return 2 * ar.asinh(ar.sqrt(ar.sinh(delta) ** 2 + sine ** 2))
+    delta, sine = np.broadcast_arrays(delta, ar.sin(ar.array(q) / 2))
+    out = np.empty(delta.shape, dtype=ar.dtype)
+    near = delta < 1
+    out[near] = 2 * ar.asinh(ar.sqrt(ar.sinh(delta[near]) ** 2 + sine[near] ** 2))
     # Factor exp(delta) out of asinh(sqrt(sinh(delta)^2 + sin(q/2)^2)).
     # All exponentials now have nonpositive arguments; no sinh(delta)^2 overflow.
-    small = ar.exp(-2 * delta)
-    scaled = ar.sqrt((1 - small) ** 2 + 4 * small * sine ** 2)
-    return 2 * delta + 2 * ar.log((scaled + ar.sqrt(scaled ** 2 + 4 * small)) / 2)
+    small = ar.exp(-2 * delta[~near])
+    scaled = ar.sqrt((1 - small) ** 2 + 4 * small * sine[~near] ** 2)
+    out[~near] = 2 * delta[~near] + 2 * ar.log((scaled + ar.sqrt(scaled ** 2 + 4 * small)) / 2)
+    return out.item() if out.ndim == 0 else out
 
 
 def dispersion(K, q, *, dps=None):
     """Onsager's gamma_q >= 0, cosh gamma_q = cosh 2K cosh 2K* - cos q, without cancellation."""
     ar = Arithmetic(dps)
-    return _dispersion(ar.number(K), q, ar)
+    return _dispersion(ar.values(K), q, ar)
 
 
 def _angles(n, l, ar):
