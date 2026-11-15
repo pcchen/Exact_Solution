@@ -5,6 +5,10 @@ what object it solves, the eigenvalue formula, the three conventions in use for 
 sign patterns are eigenvalues, and how the momentum (spin) of a level is obtained.  The code
 is the reference against which numerical transfer-matrix spectra are checked.
 
+For optional arbitrary-precision evaluation, input construction and reference-data
+export, see [Precision and reference generation](precision.md). The conventions and
+formulas in this note apply to both arithmetic paths.
+
 Every number quoted below was computed with that module on 2026-11-13.  The formula is not
 derived here (section 3 sketches where it comes from and cites the derivation); what this
 note can vouch for is that the formula AS CODED reproduces the transfer matrix built from the
