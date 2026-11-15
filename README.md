@@ -35,20 +35,26 @@ pip install "exact-solutions @ git+https://github.com/pcchen/Exact_Solution"
 ```python
 from exact_solutions import ising_exact as ie
 
-ie.levels(64, ie.Tc, 9)                       # the lowest 9 levels: E, X, charge, spin, fermions
-ie.levels(64, ie.Tc, 5, charge=1, spin=2)     # the lowest 5 of one sector
-ie.sector_tables(64, ie.Tc, 6)                # {(charge, spin): Levels} for all 2 n sectors
-ie.Ei_kmax(64, ie.Tc, 60)                     # just the values: 60 of them, -ln(lambda), ascending
-ie.gammas(ie.Tc, 64)                          # the 2 n dispersion values, Kaufman's layout
+ie.levels_reduced(64, 1, 9)                    # exactly critical: E, X, charge, spin, fermions
+ie.levels_reduced(64, 1, 5, charge=1, spin=2)  # the lowest 5 of one sector
+ie.sector_tables_reduced(64, 1, 6)             # {(charge, spin): Levels} for all 2 n sectors
+ie.levels_reduced(64, 1, 60).E                 # just the energies, ascending
+ie.gammas_reduced(1, 64)                       # the 2 n dispersion values, Kaufman's layout
 ```
 
 For reference data beyond double precision, the same functions accept `dps=`:
 
 ```python
-Tc = ie.critical_temperature(dps=80)           # do not promote the double-precision ie.Tc
-table = ie.levels(64, Tc * 6 / 5, 9, dps=80)  # 1.2 Tc, without a rounded 1.2 float
+table = ie.levels_reduced(64, "1.2", 9, dps=80) # 1.2 Tc, without a rounded 1.2 float
 print(table.X[1])                             # an mpmath number, not a Python float
 ```
+
+The canonical input is `r = T/Tc`. At `r=1` the implementation uses exact critical
+identities; nearby ratios retain their detuning. Absolute-temperature calls such as
+`ie.levels(n, T, ...)`, `sector_tables`, `gammas` and `Ei_kmax` remain adapters that
+compute `T/critical_temperature(dps=...)` in the working context. The old double-valued
+`ie.Tc` constant has been removed: use reduced temperatures for critical calculations,
+or `ie.critical_temperature(dps=...)` when a numeric absolute temperature is needed.
 
 The default remains double precision. With `dps=`, `E` and `X` are NumPy object arrays
 of arbitrary-precision numbers, while the labels remain integer arrays. Each call uses
@@ -57,7 +63,7 @@ explains input construction, exporting decimal strings, numerical limits and val
 
 `E = -ln(lambda)`; `X = (E - E_0) n / (2 pi)`; `charge` 0 / 1 = even / odd under the spin flip;
 `spin` = momentum in units of 2 pi / n, an integer in [-n/2, n/2); `T` in units J = kB = 1
-(`K = 1 / T`), `ie.Tc = 2 / ln(1 + sqrt 2)`.
+(`K = 1 / T`), `Tc = 2 / ln(1 + sqrt 2)`.
 
 **`docs/ising_exact.md`** (also `.tex` and `.pdf`) explains all of it at length: the formula,
 the three conventions in use for saying which sign patterns are eigenvalues, how the momentum
@@ -166,6 +172,10 @@ The original 13 tests in `tests/test_ising_exact.py` cover:
 and 100 working digits; temperatures separated from T_c by 1e-45; ordered-phase gaps below
 double precision; low-temperature overflow; and isolation of precision contexts and caches.
 The default path is also exercised with the optional dependency deliberately unavailable.
+`tests/test_reduced_temperature.py` covers exact critical identities, adjacent floating-point
+ratios, relative detuning accuracy down to 1e-72 at 80 digits, and absolute/reduced adapter
+consistency. `tests/test_array_helpers.py` covers NumPy sweeps and broadcasting, including
+empty arrays and both stable-formula branches.
 
 ### Provenance
 

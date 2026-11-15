@@ -46,7 +46,9 @@ WHAT THIS MODULE ADDS.
     below the first one of a high-momentum sector grows without bound.
 
 NumPy and the standard library by default. Optional dps= uses mpmath throughout;
-see critical_temperature() and docs/precision.md for inputs and output precision.
+the canonical *_reduced functions take r = T/Tc, with r = 1 exactly critical.
+The original absolute-temperature functions convert at the requested precision.
+See docs/precision.md for inputs and output precision.
 """
 
 from __future__ import annotations
@@ -65,26 +67,35 @@ else:  # Also support running this file directly, as in the original module.
 
 J = 1
 kB = 1
-Tc = 2 / np.log(1 + np.sqrt(2))
+__all__ = ["critical_temperature", "coupling", "dual_coupling", "detuning", "dispersion",
+           "gammas", "Ei_kmax", "Levels", "levels", "sector_tables", "ground_energy",
+           "coupling_reduced", "detuning_reduced", "dispersion_reduced", "gammas_reduced",
+           "levels_reduced", "sector_tables_reduced", "ground_energy_reduced"]
 
-__all__ = ["Tc", "critical_temperature", "coupling", "dual_coupling", "detuning", "dispersion",
-           "gammas", "Ei_kmax", "Levels", "levels", "sector_tables", "ground_energy"]
+
+def _critical_temperature(ar):
+    return 2 / ar.log(1 + ar.sqrt(ar.number(2)))
 
 
 def critical_temperature(*, dps=None):
     """2 / log(1 + sqrt(2)), evaluated at the requested decimal working precision.
 
-    Tc remains the double-precision convenience constant. Use this function to
-    construct a temperature for a dps= calculation without rounding through Tc.
+    This is a rounded numeric temperature. Use the *_reduced functions with r=1
+    to request exact criticality without converting through an absolute temperature.
     """
     ar = Arithmetic(dps)
-    return 2 / ar.log(1 + ar.sqrt(ar.number(2)))
+    return _critical_temperature(ar)
+
+
+def _positive(values, name, ar):
+    values = ar.values(values)
+    if not np.all(ar.isfinite(values)) or np.any(values <= 0):
+        raise ValueError(f"{name} must be finite and positive")
+    return values
 
 
 def _coupling(T, ar):
-    T = ar.values(T)
-    if not np.all(ar.isfinite(T)) or np.any(T <= 0):
-        raise ValueError("T must be finite and positive")
+    T = _positive(T, "T", ar)
     return J / (kB * T)
 
 
@@ -94,16 +105,19 @@ def coupling(T, *, dps=None):
 
 
 def _dual_coupling(K, ar):
-    # atanh(exp(-2K)), without rounding tanh(K) to one at low temperature
-    small = ar.exp(-2 * K)
+    # Below K=1 the direct tanh form has fewer rounded intermediates, which
+    # matters when K-K* cancels near Kc. At larger K, retain exp(-2K) explicitly.
     if np.ndim(K) == 0:
-        log_difference = ar.log(-ar.expm1(-2 * K)) if K < 1 else ar.log1p(-small)
-    else:
-        low = K < 1
-        log_difference = np.empty(K.shape, dtype=ar.dtype)
-        log_difference[low] = ar.log(-ar.expm1(-2 * K[low]))
-        log_difference[~low] = ar.log1p(-small[~low])
-    return (ar.log1p(small) - log_difference) / 2
+        if K < 1:
+            return -ar.log(ar.tanh(K)) / 2
+        small = ar.exp(-2 * K)
+        return (ar.log1p(small) - ar.log1p(-small)) / 2
+    low = K < 1
+    out = np.empty(K.shape, dtype=ar.dtype)
+    out[low] = -ar.log(ar.tanh(K[low])) / 2
+    small = ar.exp(-2 * K[~low])
+    out[~low] = (ar.log1p(small) - ar.log1p(-small)) / 2
+    return out
 
 
 def dual_coupling(K, *, dps=None):
@@ -119,9 +133,8 @@ def detuning(K, *, dps=None):
     return K - _dual_coupling(K, ar)
 
 
-def _dispersion(K, q, ar):
-    delta = abs(K - _dual_coupling(K, ar))
-    delta, sine = np.broadcast_arrays(delta, ar.sin(ar.array(q) / 2))
+def _dispersion_delta(delta, q, ar):
+    delta, sine = np.broadcast_arrays(abs(delta), ar.sin(ar.array(q) / 2))
     out = np.empty(delta.shape, dtype=ar.dtype)
     near = delta < 1
     out[near] = 2 * ar.asinh(ar.sqrt(ar.sinh(delta[near]) ** 2 + sine[near] ** 2))
@@ -136,7 +149,69 @@ def _dispersion(K, q, ar):
 def dispersion(K, q, *, dps=None):
     """Onsager's gamma_q >= 0, cosh gamma_q = cosh 2K cosh 2K* - cos q, without cancellation."""
     ar = Arithmetic(dps)
-    return _dispersion(ar.values(K), q, ar)
+    K = ar.values(K)
+    return _dispersion_delta(K - _dual_coupling(K, ar), q, ar)
+
+
+class _ThermalState(NamedTuple):
+    ratio: object          # T/Tc, retained for phase decisions and the cache key
+    detuning: object       # K-K*, formed without cancellation near r=1
+    log_weight: object     # log(2 sinh(2K)), exactly log(2) at r=1
+
+
+def _thermal_state(r, ar):
+    r = _positive(r, "T/Tc", ar)
+    root = ar.sqrt(ar.number(2))
+    Kc = ar.log1p(root) / 2
+    K = np.asarray(Kc / r, dtype=ar.dtype)
+    # This difference retains small offsets which Kc/r - Kc would cancel.
+    shift = np.asarray(Kc * ((1 - r) / r), dtype=ar.dtype)
+    near = np.asarray(abs(shift) < ar.number(0.25), dtype=bool)
+    delta = np.empty(shift.shape, dtype=ar.dtype)
+    log_weight = np.empty(shift.shape, dtype=ar.dtype)
+
+    # With a=exp(2Kc)=1+sqrt(2) and x=expm1(2(K-Kc)), use a^2-2a-1=0
+    # analytically. No residual from a rounded Kc survives when r is exactly 1.
+    a = 1 + root
+    x = ar.expm1(2 * shift[near])
+    delta[near] = ar.log1p(a * x * (2 * (a - 1) + a * x) / (a * (1 + x) + 1)) / 2
+    # sinh(2K) = cosh(2(K-Kc)) + sqrt(2) sinh(2(K-Kc)).
+    log_weight[near] = ar.log(ar.number(2)) + ar.log1p(
+        2 * ar.sinh(shift[near]) ** 2 + root * ar.sinh(2 * shift[near]))
+
+    delta[~near] = K[~near] - _dual_coupling(K[~near], ar)
+    log_weight[~near] = 2 * K[~near] + ar.log(-ar.expm1(-4 * K[~near]))
+    if shift.ndim == 0:
+        return _ThermalState(r, delta.item(), log_weight.item())
+    return _ThermalState(r, delta, log_weight)
+
+
+def _absolute_ratio(T, ar):
+    # Convert once, in the same context as Tc and the subsequent calculation.
+    return _positive(T, "T", ar) / _critical_temperature(ar)
+
+
+def _spectrum_state(r, ar):
+    if np.ndim(r) != 0:
+        raise ValueError("a spectrum requires one scalar temperature")
+    return _thermal_state(r, ar)
+
+
+def coupling_reduced(r, *, dps=None):
+    """K = Kc/r for r=T/Tc; scalar and array inputs are supported."""
+    ar = Arithmetic(dps)
+    return ar.log1p(ar.sqrt(ar.number(2))) / (2 * _positive(r, "T/Tc", ar))
+
+
+def detuning_reduced(r, *, dps=None):
+    """K-K* as a function of r=T/Tc, exactly zero at r=1; supports arrays."""
+    return _thermal_state(r, Arithmetic(dps)).detuning
+
+
+def dispersion_reduced(r, q, *, dps=None):
+    """Nonnegative dispersion at r=T/Tc, with NumPy broadcasting over r and q."""
+    ar = Arithmetic(dps)
+    return _dispersion_delta(_thermal_state(r, ar).detuning, q, ar)
 
 
 def _angles(n, l, ar):
@@ -152,9 +227,18 @@ def gammas(T, n, *, dps=None):
     2 (K - K*): positive below T_c, negative above.  Every other entry is positive.
     """
     ar = Arithmetic(dps)
-    K = _coupling(T, ar)
-    out = _dispersion(K, _angles(n, np.arange(2 * n), ar), ar)
-    out[0] = 2 * (K - _dual_coupling(K, ar))
+    return _gammas(n, _spectrum_state(_absolute_ratio(T, ar), ar), ar)
+
+
+def gammas_reduced(r, n, *, dps=None):
+    """Kaufman's signed dispersion array at r=T/Tc; gamma_0 is exactly zero at r=1."""
+    ar = Arithmetic(dps)
+    return _gammas(n, _spectrum_state(r, ar), ar)
+
+
+def _gammas(n, state, ar):
+    out = _dispersion_delta(state.detuning, _angles(n, np.arange(2 * n), ar), ar)
+    out[0] = 2 * state.detuning
     return out
 
 
@@ -167,10 +251,10 @@ class _Sector(NamedTuple):
     signed_zero: bool     # Kaufman's gamma_0 is negative here (charge 1 above T_c)
 
 
-def _sectors(n, K, ar):
+def _sectors(n, state, ar):
     l = np.arange(2 * n)
-    gamma = _dispersion(K, _angles(n, l, ar), ar)
-    above = K - _dual_coupling(K, ar) <= 0
+    gamma = _dispersion_delta(state.detuning, _angles(n, l, ar), ar)
+    above = state.ratio >= 1
     built = []
     for charge in (0, 1):
         modes = l[1 - charge::2]
@@ -241,21 +325,25 @@ class Levels(NamedTuple):
     fermions: np.ndarray   # occupied modes, every gamma counted positive
 
 
-def _ground_energy(n, T, ar):
-    K = _coupling(T, ar)
-    modes = _dispersion(K, _angles(n, np.arange(1, 2 * n, 2), ar), ar)
-    # log(2 sinh(2K)), without constructing an exponentially large Boltzmann weight.
-    log_weight = 2 * K + ar.log(-ar.expm1(-4 * K))
-    return -(n * log_weight + ar.fsum(np.sort(modes))) / 2
+def _ground_energy(n, state, ar):
+    modes = _dispersion_delta(state.detuning, _angles(n, np.arange(1, 2 * n, 2), ar), ar)
+    return -(n * state.log_weight + ar.fsum(np.sort(modes))) / 2
 
 
 def ground_energy(n, T, *, dps=None):
     """E_0 = -ln(lambda_0): the charge-0 vacuum, the largest eigenvalue of the transfer matrix."""
-    return _ground_energy(n, T, Arithmetic(dps))
+    ar = Arithmetic(dps)
+    return _ground_energy(n, _spectrum_state(_absolute_ratio(T, ar), ar), ar)
+
+
+def ground_energy_reduced(n, r, *, dps=None):
+    """Ground energy at r=T/Tc, using the critical normalization directly at r=1."""
+    ar = Arithmetic(dps)
+    return _ground_energy(n, _spectrum_state(r, ar), ar)
 
 
 @functools.lru_cache(maxsize=8)
-def _lowest_per_momentum(n, K, keep, dps):
+def _lowest_per_momentum(n, ratio, keep, dps):
     """For each charge: (excitation, fermions), arrays [momentum 0 .. n-1, keep], the `keep`
     lowest levels of every momentum in ascending order (inf where the sector has fewer).
 
@@ -266,9 +354,9 @@ def _lowest_per_momentum(n, K, keep, dps):
     the cut is ever lost.  n modes, each a sort of 2 x 2n lists of 2 keep numbers.
     """
     ar = Arithmetic(dps)
-    K = ar.number(K)
+    state = _spectrum_state(ratio, ar)
     tables = []
-    for sector in _sectors(n, K, ar):
+    for sector in _sectors(n, state, ar):
         energy = np.full((2, 2 * n, keep), ar.inf, dtype=ar.dtype)
         fermions = np.zeros((2, 2 * n, keep), dtype=int)
         energy[0, 0, 0] = ar.number(0)
@@ -282,18 +370,19 @@ def _lowest_per_momentum(n, K, keep, dps):
     return tables
 
 
-def _as_levels(n, T, rows, ar) -> Levels:
+def _as_levels(n, state, rows, ar) -> Levels:
     rows = sorted(rows)
     excitation = ar.array([row[0] for row in rows])
-    return Levels(E=_ground_energy(n, T, ar) + excitation, X=excitation * n / (2 * ar.pi),
+    return Levels(E=_ground_energy(n, state, ar) + excitation, X=excitation * n / (2 * ar.pi),
                   charge=np.array([row[1] for row in rows], dtype=int), spin=np.array([row[2] for row in rows], dtype=int),
                   fermions=np.array([row[3] for row in rows], dtype=int))
 
 
-def _sector_rows(n, T, keep, ar):
+def _sector_rows(n, state, keep, ar):
     out = {}
-    # Precision is part of the cache key, even when two calls have the same exact K.
-    for charge, (excitation, fermions) in enumerate(_lowest_per_momentum(n, _coupling(T, ar), keep, ar.dps)):
+    # Keep the reduced coordinate and precision in the key: rounded K alone can
+    # conflate exact criticality with an adjacent reduced temperature.
+    for charge, (excitation, fermions) in enumerate(_lowest_per_momentum(n, state.ratio, keep, ar.dps)):
         for momentum in range(n):
             spin = _fold(momentum, n)
             present = ar.isfinite(excitation[momentum])
@@ -309,27 +398,55 @@ def sector_tables(n, T, num_levels, *, dps=None) -> dict:
     One pass costs about n^2 num_levels log(num_levels) operations whatever the momentum, so
     this is the route to sectors far from spin 0.
     """
+    ar = Arithmetic(dps)
+    return _sector_tables(n, _spectrum_state(_absolute_ratio(T, ar), ar), num_levels, ar)
+
+
+def sector_tables_reduced(n, r, num_levels, *, dps=None) -> dict:
+    """The lowest num_levels of every (charge, spin) sector at r=T/Tc."""
+    ar = Arithmetic(dps)
+    return _sector_tables(n, _spectrum_state(r, ar), num_levels, ar)
+
+
+def _sector_tables(n, state, num_levels, ar):
     n, keep = int(n), int(num_levels)
     if n < 1 or keep < 1:
         raise ValueError(f"n and num_levels must be positive, got {n} and {keep}")
-    ar = Arithmetic(dps)
-    return {key: _as_levels(n, T, rows, ar) for key, rows in _sector_rows(n, T, keep, ar).items()}
+    return {key: _as_levels(n, state, rows, ar) for key, rows in _sector_rows(n, state, keep, ar).items()}
 
 
 def levels(n, T, num_levels=None, charge=None, spin=None, *, dps=None) -> Levels:
-    """The lowest `num_levels` levels of the width-n strip at temperature T, labelled.
+    """Absolute-temperature adapter for levels_reduced: r=T/critical_temperature(dps).
+
+    Convert T at the requested working precision. Already rounded inputs cannot
+    recover lost digits; new critical-point calculations should use levels_reduced
+    with r=1. All search and output conventions are those of levels_reduced.
+    """
+    ar = Arithmetic(dps)
+    state = _spectrum_state(_absolute_ratio(T, ar), ar)
+    return _levels(n, state, num_levels, charge, spin, ar)
+
+
+def levels_reduced(n, r, num_levels=None, charge=None, spin=None, *, dps=None) -> Levels:
+    """The lowest num_levels of the width-n strip at r=T/Tc, labelled.
 
     charge = 0 or 1 and spin = an integer (taken modulo n) restrict the list to one sector;
     `num_levels` then counts levels of that sector.  num_levels=None returns every level,
     2^n of them without a restriction, and is refused above n = 20.  For many sectors at
-    once call `sector_tables`.
+    once call `sector_tables_reduced`.
 
     X is always measured from the global ground level, also inside a restricted sector.
     The sign of `spin` is a convention (the spectrum is symmetric under spin -> -spin).
     dps selects decimal working precision via optional mpmath. E and X then contain
     mpf values in object arrays; labels remain integer arrays. Use strings or
-    high-precision values for T, and critical_temperature(dps=...) instead of Tc.
+    high-precision values for r. r=1 is exactly critical; nearby values are never
+    snapped to it. The numerical constant Tc is not needed on this path.
     """
+    ar = Arithmetic(dps)
+    return _levels(n, _spectrum_state(r, ar), num_levels, charge, spin, ar)
+
+
+def _levels(n, state, num_levels, charge, spin, ar):
     n = int(n)
     if n < 1:
         raise ValueError(f"the strip needs at least one site, got n = {n}")
@@ -337,23 +454,22 @@ def levels(n, T, num_levels=None, charge=None, spin=None, *, dps=None) -> Levels
         raise ValueError(f"charge is 0, 1 or None, got {charge!r}")
     if num_levels is None and n > 20:
         raise ValueError(f"num_levels=None would list 2^{n} levels; give a number")
-    ar = Arithmetic(dps)
     if spin is not None and num_levels is not None:
         # one momentum: the dynamic programme, whose cost does not depend on the momentum
         keep = int(num_levels)
         if keep < 1:
             raise ValueError("num_levels must be positive for a momentum-restricted search")
-        tables = _sector_rows(n, T, keep, ar)
+        tables = _sector_rows(n, state, keep, ar)
         wanted = _fold(spin, n)
         rows = [row for c in (0, 1) if charge in (None, c) for row in tables[(c, wanted)]]
         # Keep excitation coordinates: subtracting E_0 from total E loses small gaps.
-        return _as_levels(n, T, sorted(rows)[:keep], ar)
-    sectors = [s for s in _sectors(n, _coupling(T, ar), ar) if charge in (None, s.charge)]
+        return _as_levels(n, state, sorted(rows)[:keep], ar)
+    sectors = [s for s in _sectors(n, state, ar) if charge in (None, s.charge)]
     merged = heapq.merge(*(_stream(n, s) for s in sectors))
     if spin is not None:
         wanted = _fold(spin, n)
         merged = (row for row in merged if row[2] == wanted)
-    return _as_levels(n, T, [row[:4] for row in itertools.islice(merged, num_levels)], ar)
+    return _as_levels(n, state, [row[:4] for row in itertools.islice(merged, num_levels)], ar)
 
 
 def Ei_kmax(n, T, num_collect, kmax=None, *, dps=None):
@@ -365,17 +481,18 @@ def Ei_kmax(n, T, num_collect, kmax=None, *, dps=None):
     """
     n = int(n)
     ar = Arithmetic(dps)
-    streams = (_stream(n, s, None if kmax is None else int(kmax)) for s in _sectors(n, _coupling(T, ar), ar))
+    state = _spectrum_state(_absolute_ratio(T, ar), ar)
+    streams = (_stream(n, s, None if kmax is None else int(kmax)) for s in _sectors(n, state, ar))
     rows = itertools.islice(heapq.merge(*streams), int(num_collect))
-    return _ground_energy(n, T, ar) + ar.array(sorted(row[0] for row in rows))
+    return _ground_energy(n, state, ar) + ar.array(sorted(row[0] for row in rows))
 
 
 if __name__ == "__main__":
     # X_1 at T_c for n = 2 .. 15, then the labelled levels of the width-16 strip.
     widths = np.arange(2, 16)
-    energies = np.array([Ei_kmax(n, Tc, 3) for n in widths]).T
+    energies = np.array([levels_reduced(n, 1, 3).E for n in widths]).T
     print((energies[1] - energies[0]) * widths / (2 * np.pi))
-    table = levels(16, Tc, 12)
+    table = levels_reduced(16, 1, 12)
     print("\nn = 16 at T_c:   X          charge  spin  fermions")
     for row in zip(table.X, table.charge, table.spin, table.fermions):
         print("              %12.9f   %d     %+d     %d" % row)

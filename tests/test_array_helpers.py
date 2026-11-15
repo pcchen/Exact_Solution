@@ -52,3 +52,23 @@ def test_zero_dimensional_and_empty_arrays():
         assert ie.coupling(np.empty((0, 2)), dps=dps).shape == (0, 2)
         assert ie.dual_coupling(np.empty((0, 2)), dps=dps).shape == (0, 2)
         assert ie.dispersion(np.empty((0, 1)), np.ones((1, 2)), dps=dps).shape == (0, 2)
+
+
+def test_absolute_coupling_detuning_keeps_accuracy_near_kc():
+    oracle = mp.clone()
+    oracle.dps = 100
+    center = float(oracle.log1p(oracle.sqrt(2)) / 2)
+    lower = upper = center
+    values = [center]
+    for _ in range(200):
+        lower = np.nextafter(lower, 0.0)
+        upper = np.nextafter(upper, 1.0)
+        values.extend((lower, upper))
+    K = np.array(values)
+    expected = [oracle.mpf(k) + oracle.log(oracle.tanh(oracle.mpf(k))) / 2 for k in values]
+    actual = ie.detuning(K)
+    base = K + np.log(np.tanh(K)) / 2
+    # Preserve the previous direct formula on every NumPy/libm build, and also
+    # check an independent oracle with a bound tighter than the regressed path.
+    np.testing.assert_array_equal(actual, base)
+    assert max(abs(oracle.mpf(a) - b) for a, b in zip(actual, expected)) < oracle.mpf("6e-17")

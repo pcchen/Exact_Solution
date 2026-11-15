@@ -98,6 +98,9 @@ class Arithmetic:
     def sinh(self, value):
         return self._unary("sinh", "sinh", value)
 
+    def tanh(self, value):
+        return self._unary("tanh", "tanh", value)
+
     def asinh(self, value):
         return self._unary("arcsinh", "asinh", value)
 

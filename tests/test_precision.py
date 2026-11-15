@@ -5,6 +5,7 @@ No double-precision oracle or float conversion participates in the error bounds.
 
 import subprocess
 import sys
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -51,19 +52,22 @@ def dense_sectors(n, T, ctx):
 
 
 @pytest.mark.parametrize("ratio", ["0.7", "1", "1.4"])
-def test_high_precision_spectrum_against_boltzmann_definition(ratio):
+@pytest.mark.parametrize("reduced", [False, True])
+def test_high_precision_spectrum_against_boltzmann_definition(ratio, reduced):
     ctx = context()
     T = ctx.mpf(ratio) * 2 / ctx.log(1 + ctx.sqrt(2))
+    calculate = ie.levels_reduced if reduced else ie.levels
+    temperature = ratio if reduced else T
     for n in (1, 2, 3, 4):
         expected = dense_sectors(n, T, ctx)
         ground = min(min(e) for e in expected.values())
-        table = ie.levels(n, T, dps=80)
+        table = calculate(n, temperature, dps=80)
         assert table.E.dtype == table.X.dtype == object
         assert table.charge.dtype.kind == table.spin.dtype.kind == table.fermions.dtype.kind == "i"
         assert len(table.E) == 2 ** n
         for (charge, spin), energies in expected.items():
             selected = (table.charge == charge) & (table.spin == spin)
-            direct = ie.levels(n, T, len(energies) + 2, charge=charge, spin=spin, dps=80)
+            direct = calculate(n, temperature, len(energies) + 2, charge=charge, spin=spin, dps=80)
             expected_x = [(e - ground) * n / (2 * ctx.pi) for e in energies]
             for actual_e, actual_x in ((table.E[selected], table.X[selected]), (direct.E, direct.X)):
                 assert len(actual_e) == len(energies)
@@ -91,7 +95,7 @@ def test_high_precision_constants_dispersion_and_critical_detuning():
     ctx = context()
     Tc = 2 / ctx.log(1 + ctx.sqrt(2))
     assert abs(ctx.mpf(ie.critical_temperature(dps=80)) - Tc) < ctx.mpf("1e-79")
-    assert ie.critical_temperature() == ie.Tc
+    assert abs(ctx.mpf(ie.critical_temperature()) - Tc) < ctx.mpf("1e-15")
     for sign in (-1, 1):
         T = Tc * (1 + sign * ctx.mpf("1e-45"))
         K = 1 / T
@@ -128,9 +132,9 @@ def test_sector_tables_and_legacy_entry_point_preserve_precision():
 
 def test_precision_is_in_cache_key_and_global_context_is_untouched():
     before = mp.dps
-    low = ie.sector_tables(8, "2", 4, dps=25)
-    high = ie.sector_tables(8, "2", 4, dps=80)  # same exact coupling, distinct precision
-    again = ie.sector_tables(8, "2", 4, dps=25)
+    low = ie.sector_tables_reduced(8, 1, 4, dps=25)
+    high = ie.sector_tables_reduced(8, 1, 4, dps=80)  # same exact ratio, distinct precision
+    again = ie.sector_tables_reduced(8, 1, 4, dps=25)
     assert mp.dps == before
     assert high[(1, 0)].X[0].context.dps == 80
     assert low[(1, 0)].X[0].context.dps == 25
@@ -229,12 +233,12 @@ def without_mpmath(name, *args, **kwargs):
     return original(name, *args, **kwargs)
 builtins.__import__ = without_mpmath
 from exact_solutions import ising_exact as ie
-assert ie.levels(4, ie.Tc, 3).X.dtype.kind == "f"
+assert ie.levels(4, ie.critical_temperature(), 3).X.dtype.kind == "f"
 try:
-    ie.levels(4, ie.Tc, 3, dps=80)
+    ie.levels(4, ie.critical_temperature(), 3, dps=80)
 except ImportError as error:
     assert "exact-solutions[precision]" in str(error)
 else:
     raise AssertionError("missing optional dependency was not reported")
 '''
-    subprocess.run([sys.executable, "-c", code], check=True)
+    subprocess.run([sys.executable, "-c", code], check=True, cwd=Path(__file__).resolve().parents[1])
