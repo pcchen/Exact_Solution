@@ -60,6 +60,13 @@ key, rather than the rounded coupling alone.
 
 ## Exporting reference values
 
+For the Uni20 HOTRG grid, use the committed
+[`ising_reference_high_precision.json`](../tests/data/ising_reference_high_precision.json):
+328 scaling dimensions at 100 significant digits, with exact rational reduced
+temperatures. The [data documentation](../tests/data/) describes the format,
+provenance and checked regeneration command. Consumers round this single file
+to their own precision. The historical double-precision fixture stays separate.
+
 Export decimal strings, not JSON numbers or Python floats. For example, this
 generates the strip widths and temperatures used by the Uni20 HOTRG example:
 

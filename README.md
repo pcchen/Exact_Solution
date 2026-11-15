@@ -177,6 +177,12 @@ ratios, relative detuning accuracy down to 1e-72 at 80 digits, and absolute/redu
 consistency. `tests/test_array_helpers.py` covers NumPy sweeps and broadcasting, including
 empty arrays and both stable-formula branches.
 
+[`tests/data/`](tests/data/) also provides a canonical 100-digit reference for
+the 328 HOTRG scaling dimensions. Its decimal strings are checked at 140 and
+180 working digits before publication, and consumed by regression tests at
+double precision and 25, 50 and 100 working digits. The historical fixture
+remains separate. A regeneration script and input metadata accompany the data.
+
 ### Provenance
 
 `gammas` and `Ei_kmax` keep the names, signature and Kaufman convention of an earlier script
