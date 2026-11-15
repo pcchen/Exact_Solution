@@ -4,9 +4,10 @@ Exact results for lattice models, kept in one place to check numerical work agai
 
 House rules for this repository:
 
-- **numpy and the standard library only** in the package itself, so that any project can
-  import it without pulling in a tensor-network engine or a solver stack.  `scipy` and
-  `pytest` are needed to run the tests, not to use the code.
+- **numpy and the standard library only by default**, so that any project can import it
+  without pulling in a tensor-network engine or a solver stack. Optional arbitrary-precision
+  calculations use `mpmath` (`pip install ".[precision]"`). `scipy`, `pytest` and `mpmath`
+  are used by the tests.
 - **Each module states** the object it solves, its conventions, where the formula comes from,
   and how the code was checked against the **definition** — not only against another
   implementation.
@@ -18,7 +19,7 @@ House rules for this repository:
 
 ```bash
 pip install -e ".[dev]"      # or just: pip install -e .
-pytest                       # 13 tests, about 2 s
+pytest                       # includes independent high-precision Boltzmann-matrix checks
 ```
 
 Another project can use it straight from GitHub:
@@ -40,6 +41,19 @@ ie.sector_tables(64, ie.Tc, 6)                # {(charge, spin): Levels} for all
 ie.Ei_kmax(64, ie.Tc, 60)                     # just the values: 60 of them, -ln(lambda), ascending
 ie.gammas(ie.Tc, 64)                          # the 2 n dispersion values, Kaufman's layout
 ```
+
+For reference data beyond double precision, the same functions accept `dps=`:
+
+```python
+Tc = ie.critical_temperature(dps=80)           # do not promote the double-precision ie.Tc
+table = ie.levels(64, Tc * 6 / 5, 9, dps=80)  # 1.2 Tc, without a rounded 1.2 float
+print(table.X[1])                             # an mpmath number, not a Python float
+```
+
+The default remains double precision. With `dps=`, `E` and `X` are NumPy object arrays
+of arbitrary-precision numbers, while the labels remain integer arrays. Each call uses
+an isolated precision context. [Precision and reference generation](docs/precision.md)
+explains input construction, exporting decimal strings, numerical limits and validation.
 
 `E = -ln(lambda)`; `X = (E - E_0) n / (2 pi)`; `charge` 0 / 1 = even / odd under the spin flip;
 `spin` = momentum in units of 2 pi / n, an integer in [-n/2, n/2); `T` in units J = kB = 1
@@ -129,7 +143,9 @@ Timings (Mac, 2026-11-13): `Ei_kmax(18, Tc, 18)` 0.16 ms, `Ei_kmax(64, Tc, 60)` 
   random starts; asking for 16 and keeping 8 gave 0 of 20.)  Sector by sector the copies sit
   in different lists and the problem does not arise.
 
-### How it was checked (`tests/test_ising_exact.py`, 13 tests, about 2 s)
+### How it was checked
+
+The original 13 tests in `tests/test_ising_exact.py` cover:
 
 - **Against the definition.**  V built from the Boltzmann weights above, projected onto every
   (charge, momentum) sector with the spin flip and the translation written as permutations of
@@ -144,6 +160,12 @@ Timings (Mac, 2026-11-13): `Ei_kmax(18, Tc, 18)` 0.16 ms, `Ei_kmax(64, Tc, 60)` 
 - **The CFT** at T_c, n = 64: (X, charge, spin) = (0, 0, 0), (1/8, 1, 0), (1, 0, 0),
   (1 + 1/8, 1, +-1), (2, 0, +-1 and +-2); and c = 1/2 from E_0 = n f - pi c / (6 n) with
   Onsager's f, which also fixes the absolute normalization of lambda.
+
+`tests/test_precision.py` additionally checks the full spectrum and both labels against
+120-digit Boltzmann matrices for n = 1 .. 4 at 0.7, 1 and 1.4 T_c; convergence at 30, 60
+and 100 working digits; temperatures separated from T_c by 1e-45; ordered-phase gaps below
+double precision; low-temperature overflow; and isolation of precision contexts and caches.
+The default path is also exercised with the optional dependency deliberately unavailable.
 
 ### Provenance
 

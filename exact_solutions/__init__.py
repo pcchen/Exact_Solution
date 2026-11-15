@@ -1,7 +1,8 @@
 """Exact solutions, kept as references to check numerical results against.
 
 Each module states the object it solves, its conventions, where the formula comes from and how
-the code was checked against the definition.  numpy and the standard library only.
+the code was checked against the definition. NumPy and the standard library are the
+default dependencies; optional arbitrary-precision calculations use mpmath.
 
     ising_exact   the spectrum of the 2D Ising transfer matrix on a strip of finite width,
                   every level labelled by charge and momentum
